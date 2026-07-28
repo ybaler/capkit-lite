@@ -49,3 +49,15 @@ class TestParseSrt(unittest.TestCase):
     def test_no_cues_raises(self):
         with self.assertRaises(ck.ParseError):
             ck.parse_srt("not a subtitle file")
+
+
+class TestChunker(unittest.TestCase):
+    def test_splits_on_sentence_end(self):
+        words = [ck.Word("Hi.", 0.0, 0.3), ck.Word("There", 0.4, 0.7)]
+        cues = ck.chunk(words, max_words=10, max_chars=100, max_duration=10.0)
+        self.assertEqual(len(cues), 2)
+
+    def test_respects_max_words(self):
+        words = [ck.Word(str(i), i * 0.2, i * 0.2 + 0.15) for i in range(6)]
+        cues = ck.chunk(words, max_words=3, max_chars=100, max_duration=10.0)
+        self.assertTrue(all(len(c.words) <= 3 for c in cues))
