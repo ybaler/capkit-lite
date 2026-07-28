@@ -29,3 +29,9 @@ python capkit_lite.py transcript.json -o captions.ass
 python capkit_lite.py transcript.json --video clip.mp4 --burn out.mp4
 python capkit_lite.py subs.srt -o captions.ass
 ```
+
+## What it doesn't do
+
+- One style only. No presets, no per-run color/layout tuning beyond
+  --active-color and --no-uppercase.
+- No batch processing.
