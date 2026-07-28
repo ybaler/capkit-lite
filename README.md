@@ -35,3 +35,14 @@ python capkit_lite.py subs.srt -o captions.ass
 - One style only. No presets, no per-run color/layout tuning beyond
   --active-color and --no-uppercase.
 - No batch processing.
+
+Full version, CapKit, $29 one-time, no subscription:
+https://y1fygy-sg.myshopify.com/?utm_source=github&utm_medium=readme&utm_campaign=capkit_launch
+
+## Tests
+
+    python -m unittest test_capkit_lite -v
+
+## License
+
+MIT. See LICENSE.
