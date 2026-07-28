@@ -1,22 +1,14 @@
 # capkit_lite
 
-Word-highlighted animated captions for short-form video. One file, one
-style preset, zero dependencies.
+![capkit_lite punch preset, real output](images/hero.jpg)
 
-Takes a word-timestamped transcript and writes an .ass subtitle file
-where the word being spoken is highlighted as it's said - the caption
-style you see on most short-form video. Optionally burns it straight into
-your video if ffmpeg is on your PATH.
-
-## Why
-
-Most caption tools are $20-40/month subscriptions. This is free, runs
-offline, and is a single Python file you can read top to bottom in five
-minutes.
+Word-highlighted animated captions for short-form video. One file, zero
+dependencies. Most caption tools are $20-40/month subscriptions; this is
+free and runs offline.
 
 ## Install
 
-Nothing to install. Requires Python 3.10+, stdlib only.
+Requires Python 3.10+, stdlib only.
 
 ```
 python capkit_lite.py --help
@@ -30,13 +22,12 @@ python capkit_lite.py transcript.json --video clip.mp4 --burn out.mp4
 python capkit_lite.py subs.srt -o captions.ass
 ```
 
-## What it doesn't do
+Accepts Whisper / faster-whisper / WhisperX / Deepgram / AssemblyAI JSON,
+or plain SRT/VTT.
 
-- One style only. No presets, no per-run color/layout tuning beyond
-  --active-color and --no-uppercase.
-- No batch processing.
+One style only, no batch processing. --burn needs ffmpeg on PATH.
 
-Full version, CapKit, $29 one-time, no subscription:
+Full version, CapKit, is a $29 one-time purchase, no subscription:
 https://y1fygy-sg.myshopify.com/?utm_source=github&utm_medium=readme&utm_campaign=capkit_launch
 
 ## Tests
