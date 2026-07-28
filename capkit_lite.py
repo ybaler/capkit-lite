@@ -218,7 +218,7 @@ def load(path: str) -> List[Word]:
 
 
 _SENTENCE_END = (".", "!", "?", "…")
-_SOFT_END = (",", ";", ":", "-")
+_SOFT_END = (",", ";", ":", "—", "-")
 
 
 def chunk(words: List[Word], max_words: int, max_chars: int, max_duration: float,
@@ -369,3 +369,138 @@ def write_ass(path: str, cues, style: dict, width: int, height: int) -> None:
     content = build_header(style, width, height) + "\n".join(build_events(cues, style)) + "\n"
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(content)
+
+
+class FFmpegMissing(Exception):
+    pass
+
+
+class BurnError(Exception):
+    pass
+
+
+def _tool(name: str) -> str:
+    path = shutil.which(name)
+    if not path:
+        raise FFmpegMissing(
+            f"'{name}' not found on PATH.\n"
+            "  Windows : winget install Gyan.FFmpeg   (then reopen your terminal)\n"
+            "  macOS   : brew install ffmpeg\n"
+            "  Linux   : sudo apt install ffmpeg"
+        )
+    return path
+
+
+def probe_size(video: str) -> Optional[Tuple[int, int]]:
+    try:
+        ffprobe = _tool("ffprobe")
+    except FFmpegMissing:
+        return None
+    cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
+           "-show_entries", "stream=width,height", "-of", "json", video]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=30)
+        if out.returncode != 0:
+            return None
+        streams = json.loads(out.stdout).get("streams") or []
+        if not streams:
+            return None
+        w, h = int(streams[0]["width"]), int(streams[0]["height"])
+        return (w, h) if w > 0 and h > 0 else None
+    except (subprocess.SubprocessError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+
+
+def _escape_filter_path(path: str) -> str:
+    p = os.path.abspath(path).replace("\\", "/")
+    p = p.replace(":", "\\:")
+    p = p.replace("'", "\\'")
+    return p
+
+
+def burn(video: str, ass_path: str, output: str, crf: int = 18, preset: str = "medium") -> str:
+    ffmpeg = _tool("ffmpeg")
+    if not os.path.exists(video):
+        raise BurnError(f"video not found: {video}")
+    if not os.path.exists(ass_path):
+        raise BurnError(f"subtitle file not found: {ass_path}")
+    vf = f"subtitles='{_escape_filter_path(ass_path)}'"
+    cmd = [ffmpeg, "-y", "-i", video, "-vf", vf, "-c:v", "libx264",
+           "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p", "-c:a", "copy", output]
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stderr or "").strip().splitlines()[-12:])
+        raise BurnError(f"ffmpeg failed:\n{tail}")
+    return output
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(
+        prog="capkit_lite",
+        description="Word-highlighted animated captions. One preset, zero dependencies.",
+    )
+    p.add_argument("transcript", nargs="?", help="Whisper/Deepgram/AssemblyAI JSON, SRT, or VTT file")
+    p.add_argument("-o", "--output", default=None, help="output .ass path (default: <transcript>.ass)")
+    p.add_argument("--video", help="source video, used to auto-detect frame size")
+    p.add_argument("--burn", metavar="OUT.mp4", help="burn captions into --video and write here")
+    p.add_argument("--width", type=int, default=1080)
+    p.add_argument("--height", type=int, default=1920)
+    p.add_argument("--active-color", default=STYLE["active_color"], help="spoken-word colour, e.g. #FFDD00")
+    p.add_argument("--no-uppercase", action="store_true")
+    p.add_argument("--version", action="version", version=f"capkit_lite {__version__}")
+    args = p.parse_args(argv)
+
+    if not args.transcript:
+        p.print_help()
+        return 1
+    if not os.path.exists(args.transcript):
+        print(f"error: transcript not found: {args.transcript}", file=sys.stderr)
+        return 1
+
+    style = dict(STYLE)
+    style["active_color"] = args.active_color
+    if args.no_uppercase:
+        style["uppercase"] = False
+
+    try:
+        words = load(args.transcript)
+    except ParseError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    cues = chunk(words, max_words=style["max_words"], max_chars=style["max_chars"],
+                 max_duration=style["max_duration"])
+
+    width, height = args.width, args.height
+    if args.video:
+        size = probe_size(args.video)
+        if size:
+            width, height = size
+        else:
+            print(f"warning: could not read video size, using {width}x{height}", file=sys.stderr)
+
+    out_path = args.output or (os.path.splitext(args.transcript)[0] + ".ass")
+    try:
+        write_ass(out_path, cues, style, width, height)
+    except (ValueError, OSError) as exc:
+        print(f"error: could not write {out_path}: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote {out_path}  ({len(words)} words, {len(cues)} cues, {width}x{height})")
+
+    if args.burn:
+        if not args.video:
+            print("error: --burn requires --video", file=sys.stderr)
+            return 1
+        try:
+            print("burning captions (this takes about as long as the clip)...")
+            burn(args.video, out_path, args.burn)
+            print(f"wrote {args.burn}")
+        except (FFmpegMissing, BurnError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
