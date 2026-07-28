@@ -160,3 +160,102 @@ def parse_json(raw_text: str) -> List[Word]:
     if native_unit == "s":
         return words
     return _to_seconds(words) if _looks_like_milliseconds(words) else words
+
+
+_TS = re.compile(
+    r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*"
+    r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})"
+)
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _ts_to_seconds(h: str, m: str, s: str, ms: str) -> float:
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")) / 1000.0
+
+
+def parse_srt(raw_text: str) -> List[Word]:
+    words: List[Word] = []
+    lines = raw_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    i = 0
+    while i < len(lines):
+        m = _TS.search(lines[i])
+        if not m:
+            i += 1
+            continue
+        start = _ts_to_seconds(*m.groups()[:4])
+        end = _ts_to_seconds(*m.groups()[4:])
+        i += 1
+        text_lines = []
+        while i < len(lines) and lines[i].strip() and not _TS.search(lines[i]):
+            text_lines.append(lines[i])
+            i += 1
+        text = _TAG.sub("", " ".join(text_lines)).strip()
+        tokens = [t for t in text.split() if t]
+        if not tokens:
+            continue
+        span = max(end - start, 0.001)
+        weights = [max(len(t), 1) for t in tokens]
+        total = sum(weights)
+        cursor = start
+        for tok, weight in zip(tokens, weights):
+            dur = span * (weight / total)
+            words.append(Word(text=tok, start=cursor, end=cursor + dur))
+            cursor += dur
+    if not words:
+        raise ParseError("no cues found in subtitle file")
+    return words
+
+
+def load(path: str) -> List[Word]:
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        raw = fh.read()
+    head = raw.lstrip()[:1]
+    if head in ("{", "["):
+        return parse_json(raw)
+    if _TS.search(raw):
+        return parse_srt(raw)
+    return parse_json(raw)
+
+
+_SENTENCE_END = (".", "!", "?", "…")
+_SOFT_END = (",", ";", ":", "-")
+
+
+def chunk(words: List[Word], max_words: int, max_chars: int, max_duration: float,
+          max_gap: float = 0.55, hold_last: float = 0.12) -> List[Cue]:
+    cues: List[Cue] = []
+    current: List[Word] = []
+
+    def flush():
+        if current:
+            cues.append(Cue(words=list(current)))
+            current.clear()
+
+    for word in words:
+        if current:
+            gap = word.start - current[-1].end
+            prospective_chars = len(" ".join(w.text for w in current)) + 1 + len(word.text)
+            duration = word.end - current[0].start
+            if gap > max_gap:
+                flush()
+            elif len(current) >= max_words:
+                flush()
+            elif prospective_chars > max_chars:
+                flush()
+            elif duration > max_duration:
+                flush()
+            elif current[-1].text.endswith(_SOFT_END) and len(current) >= max(2, max_words - 1):
+                flush()
+        current.append(word)
+        if word.text.endswith(_SENTENCE_END):
+            flush()
+    flush()
+
+    if hold_last > 0:
+        for i, cue in enumerate(cues):
+            if not cue.words:
+                continue
+            limit = cues[i + 1].start if i + 1 < len(cues) else cue.end + hold_last
+            cue.words[-1].end = min(cue.end + hold_last, limit)
+
+    return cues
